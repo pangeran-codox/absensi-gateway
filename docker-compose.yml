@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: absensi
+      POSTGRES_PASSWORD: absensi_local_dev
+      POSTGRES_DB: eduzone_absensi
+      TZ: Asia/Jakarta
+    ports:
+      - "5433:5432"   # beda port dari default (5432) supaya tidak bentrok
+                      # kalau di komputer lokal sudah ada Postgres lain jalan
+    volumes:
+      - absensi_pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U absensi -d eduzone_absensi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  absensi-gateway:
+    build: .
+    environment:
+      LISTEN_ADDR: ":8080"
+      DATABASE_URL: "postgres://absensi:absensi_local_dev@postgres:5432/eduzone_absensi?sslmode=disable"
+      JWT_SECRET: "test-secret-jangan-dipakai-production"
+      GEOFENCE_RADIUS_METERS: "150"
+      TZ: "Asia/Jakarta"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  absensi_pgdata:
