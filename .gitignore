@@ -1,0 +1,19 @@
+# Binary hasil build
+/absensi-gateway
+*.exe
+*.test
+*.out
+
+# Environment variables asli (JANGAN pernah commit secret beneran)
+.env
+
+# Data Postgres lokal kalau ada bind-mount volume
+docker/pgdata/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Go
+vendor/
