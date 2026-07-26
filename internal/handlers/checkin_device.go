@@ -1,10 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -40,6 +40,15 @@ type checkinDeviceRequest struct {
 type FaceJobResult struct {
 	Status string `json:"status"` // "processing" | "done"
 	Result string `json:"result,omitempty"`
+
+	// deviceID & schoolID huruf kecil (unexported) supaya otomatis TIDAK
+	// ikut ter-encode ke response JSON — dua field ini murni dipakai
+	// internal untuk memastikan device yang polling job ini adalah device
+	// yang sama yang membuatnya. Tanpa ini, device mana saja (asal device
+	// key-nya valid) bisa menebak/mencoba job_id device lain dan mengintip
+	// hasil pengenalan wajah orang yang bukan urusannya.
+	deviceID string
+	schoolID string
 }
 
 var validMethods = map[string]bool{"rfid": true, "qr": true, "face": true}
@@ -52,8 +61,7 @@ const duplicateScanWindow = 5 * time.Second
 
 func (h *DeviceHandler) CheckinDevice(w http.ResponseWriter, r *http.Request) {
 	var req checkinDeviceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_body", "Body request tidak valid")
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -104,8 +112,31 @@ func (h *DeviceHandler) handleSyncCheckin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Semua langkah dari titik ini (cek anomali sampai insert event) harus
+	// jadi satu paket yang tidak bisa diselak request lain untuk
+	// person_id+method yang SAMA — makanya dibungkus transaksi + advisory
+	// lock, bukan dua query terpisah seperti sebelumnya. Tanpa ini, dua
+	// scan yang datang nyaris bersamaan bisa sama-sama "melihat" belum ada
+	// event sebelumnya dan lolos berdua dari cek duplicate_scan_within_5s.
+	tx, err := h.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Gagal memulai transaksi")
+		return
+	}
+	defer tx.Rollback() // no-op kalau sudah di-Commit di bawah
+
+	// pg_advisory_xact_lock mengunci berdasarkan angka, jadi person_id
+	// (uuid/string) diubah dulu jadi angka pakai hashtext(). Lock ini
+	// otomatis lepas saat transaksi commit/rollback (makanya versi "xact").
+	if _, err := tx.ExecContext(r.Context(),
+		`SELECT pg_advisory_xact_lock(hashtext($1 || $2))`, personID, req.Method); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Gagal mengambil lock")
+		return
+	}
+
 	// Cek anomali: scan berulang terlalu cepat untuk orang yang sama.
-	anomalyReasons := h.detectAnomalies(r, personID, personType, req.Method)
+	// Pakai tx (bukan h.DB) supaya baca data di dalam transaksi yang sama.
+	anomalyReasons := h.detectAnomalies(r, tx, personID, personType, req.Method)
 
 	// Auto-resolve jadwal aktif kalau device ini terpasang tetap di 1
 	// ruang kelas/lab (default_class_id). Kosong (bukan error) kalau
@@ -126,16 +157,21 @@ func (h *DeviceHandler) handleSyncCheckin(w http.ResponseWriter, r *http.Request
 
 	var eventID int64
 	var personName string
-	err = h.DB.QueryRowContext(r.Context(), `
+	err = tx.QueryRowContext(r.Context(), `
 		INSERT INTO attendance_events
-			(school_id, device_id, schedule_id, person_id, person_type, method, event_type, is_valid, raw_payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			(school_id, device_id, schedule_id, person_id, person_type, method, event_type, is_valid, flagged_reason, raw_payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id
 	`, schoolID, deviceID, scheduleIDParam, personID, personType, req.Method, req.EventType,
-		len(anomalyReasons) == 0, mustJSON(req)).Scan(&eventID)
+		len(anomalyReasons) == 0, joinReasons(anomalyReasons), mustJSON(req)).Scan(&eventID)
 
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Gagal mencatat event absensi")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Gagal menyimpan event absensi")
 		return
 	}
 
@@ -168,12 +204,20 @@ func (h *DeviceHandler) handleSyncCheckin(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// queryRowContexter adalah kontrak minimal yang dipenuhi baik *sql.DB
+// maupun *sql.Tx — supaya detectAnomalies bisa dipanggil dengan salah
+// satunya (di sini dipanggil dengan tx, supaya baca datanya konsisten
+// dalam transaksi yang sama dengan insert setelahnya).
+type queryRowContexter interface {
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+}
+
 // detectAnomalies mengecek pola mencurigakan sederhana. Ini fondasi
 // awal — bisa dikembangkan lagi (mis. cek lokasi device vs jadwal
 // siswa) tanpa mengubah kontrak API.
-func (h *DeviceHandler) detectAnomalies(r *http.Request, personID, personType, method string) []string {
+func (h *DeviceHandler) detectAnomalies(r *http.Request, q queryRowContexter, personID, personType, method string) []string {
 	var lastRecordedAt time.Time
-	err := h.DB.QueryRowContext(r.Context(), `
+	err := q.QueryRowContext(r.Context(), `
 		SELECT recorded_at FROM attendance_events
 		WHERE person_id = $1 AND person_type = $2 AND method = $3
 		ORDER BY recorded_at DESC LIMIT 1
@@ -204,7 +248,7 @@ func (h *DeviceHandler) handleFaceCheckin(w http.ResponseWriter, r *http.Request
 	jobID := generateJobID()
 
 	h.jobStoreMu.Lock()
-	h.jobStore[jobID] = FaceJobResult{Status: "processing"}
+	h.jobStore[jobID] = FaceJobResult{Status: "processing", deviceID: deviceID, schoolID: schoolID}
 	h.jobStoreMu.Unlock()
 
 	// TODO: publish job ke queue nyata untuk dikonsumsi worker Python.
@@ -220,12 +264,19 @@ func (h *DeviceHandler) handleFaceCheckin(w http.ResponseWriter, r *http.Request
 // GetFaceJobResult adalah endpoint polling GET /checkin/device/jobs/{job_id}.
 func (h *DeviceHandler) GetFaceJobResult(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("job_id")
+	requestingDeviceID, _ := r.Context().Value(middleware.CtxDeviceID).(string)
 
 	h.jobStoreMu.Lock()
 	result, ok := h.jobStore[jobID]
 	h.jobStoreMu.Unlock()
 
-	if !ok {
+	// Sengaja dipakai pesan & status code YANG SAMA ("job_not_found", 404)
+	// baik untuk job yang memang tidak ada, MAUPUN job yang ada tapi
+	// kepunyaan device lain. Kalau dibedakan (mis. 403 "bukan milik anda"),
+	// itu jadi bocor informasi ke device yang coba menebak-nebak: dia jadi
+	// tahu job_id itu valid, cuma bukan miliknya — cukup buat mempersempit
+	// tebakan job_id device lain.
+	if !ok || result.deviceID != requestingDeviceID {
 		writeError(w, http.StatusNotFound, "job_not_found", "Job tidak ditemukan")
 		return
 	}

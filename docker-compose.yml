@@ -1,36 +1,25 @@
 services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: absensi
-      POSTGRES_PASSWORD: absensi_local_dev
-      POSTGRES_DB: eduzone_absensi
-      TZ: Asia/Jakarta
-    ports:
-      - "5433:5432"   # beda port dari default (5432) supaya tidak bentrok
-                      # kalau di komputer lokal sudah ada Postgres lain jalan
-    volumes:
-      - absensi_pgdata:/var/lib/postgresql/data
-      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U absensi -d eduzone_absensi"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   absensi-gateway:
     build: .
     environment:
       LISTEN_ADDR: ":8080"
-      DATABASE_URL: "postgres://absensi:absensi_local_dev@postgres:5432/eduzone_absensi?sslmode=disable"
-      JWT_SECRET: "test-secret-jangan-dipakai-production"
-      GEOFENCE_RADIUS_METERS: "150"
+      # host "postgres" adalah hostname container Postgres yang SUDAH
+      # jalan di infra kamu (bukan bikin container baru) — bisa diakses
+      # karena service ini digabungkan ke network yang sama (lihat bagian
+      # `networks` di bawah).
+      #
+      # ${POSTGRES_USER}, ${POSTGRES_PASSWORD}, ${JWT_SECRET} diambil dari
+      # file .env di folder yang sama (docker compose otomatis membacanya,
+      # TIDAK perlu di-load manual). Isi file .env TIDAK boleh commit ke
+      # git — sudah ada di .gitignore.
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/eduzone_absensi?sslmode=disable"
+      JWT_SECRET: "${JWT_SECRET}"
       TZ: "Asia/Jakarta"
     ports:
       - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
+    networks:
+      - network
 
-volumes:
-  absensi_pgdata:
+networks:
+  network:
+    external: true

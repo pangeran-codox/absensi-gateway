@@ -3,12 +3,22 @@ package main
 import (
 	"log"
 	"net/http"
+	_ "time/tzdata" // embed database zoneinfo IANA ke dalam binary — lihat komentar di bawah
 
 	"absensi-gateway/internal/config"
 	"absensi-gateway/internal/db"
 	"absensi-gateway/internal/handlers"
 	"absensi-gateway/internal/middleware"
 )
+
+// Import "time/tzdata" (side-effect only, tidak dipakai langsung) membuat
+// binary ini membawa SENDIRI database zoneinfo IANA (termasuk
+// "Asia/Jakarta"), tidak bergantung pada file /usr/share/zoneinfo di image
+// Docker tempat ia berjalan. Tanpa ini, kalau base image runtime suatu
+// saat diganti ke image yang lebih minimal (mis. scratch/distroless tanpa
+// paket tzdata), env var TZ=Asia/Jakarta akan DIAM-DIAM gagal di-resolve
+// dan scheduling.ResolveActiveSchedule balik memakai UTC — bug yang susah
+// ketahuan karena tidak ada error, cuma jadwal jadi salah beberapa jam.
 
 // chain menyusun beberapa middleware menjadi satu, dieksekusi berurutan
 // dari kiri ke kanan (chain(a, b)(handler) => a(b(handler))).
@@ -46,26 +56,34 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// Semua route dipasangi middleware.MaxBodySize PALING LUAR (dieksekusi
+	// paling awal, sebelum auth/handler apapun sempat baca body). Ini
+	// pengaman terhadap body request raksasa yang bisa bikin server
+	// kehabisan memori (DoS) — lihat komentar di internal/middleware/bodylimit.go.
+	// Ukurannya beda-beda tergantung payload wajar tiap endpoint.
+
 	// --- Endpoint device tetap (RFID/QR/Face) ---
+	// SizeImage dipakai karena endpoint ini juga menerima foto (face check-in).
 	mux.Handle("POST /api/v1/checkin/device",
-		chain(deviceAuth)(http.HandlerFunc(deviceHandler.CheckinDevice)))
+		chain(middleware.MaxBodySize(middleware.SizeImage), deviceAuth)(http.HandlerFunc(deviceHandler.CheckinDevice)))
 
 	mux.Handle("GET /api/v1/checkin/device/jobs/{job_id}",
-		chain(deviceAuth)(http.HandlerFunc(deviceHandler.GetFaceJobResult)))
+		chain(middleware.MaxBodySize(middleware.SizeSmall), deviceAuth)(http.HandlerFunc(deviceHandler.GetFaceJobResult)))
 
 	mux.Handle("POST /api/v1/devices/heartbeat",
-		chain(deviceAuth)(http.HandlerFunc(deviceOpsHandler.Heartbeat)))
+		chain(middleware.MaxBodySize(middleware.SizeSmall), deviceAuth)(http.HandlerFunc(deviceOpsHandler.Heartbeat)))
 
 	// --- Endpoint guru (web/PWA, JWT dari Eduzone) ---
 	mux.Handle("POST /api/v1/checkin/teacher",
-		chain(jwtAuth)(http.HandlerFunc(teacherHandler.CheckinTeacher)))
+		chain(middleware.MaxBodySize(middleware.SizeSmall), jwtAuth)(http.HandlerFunc(teacherHandler.CheckinTeacher)))
 
 	mux.Handle("GET /api/v1/attendance/daily",
-		chain(jwtAuth)(http.HandlerFunc(attendanceHandler.GetDaily)))
+		chain(middleware.MaxBodySize(middleware.SizeSmall), jwtAuth)(http.HandlerFunc(attendanceHandler.GetDaily)))
 
 	// --- Endpoint admin ---
+	// SizeEnrollment dipakai karena enrollment face bisa membawa beberapa foto sekaligus.
 	mux.Handle("POST /api/v1/enrollment/credentials",
-		chain(jwtAuth, adminOnly)(http.HandlerFunc(enrollmentHandler.EnrollCredential)))
+		chain(middleware.MaxBodySize(middleware.SizeEnrollment), jwtAuth, adminOnly)(http.HandlerFunc(enrollmentHandler.EnrollCredential)))
 
 	log.Printf("absensi-gateway listening on %s", cfg.ListenAddr)
 	if err := http.ListenAndServe(cfg.ListenAddr, mux); err != nil {

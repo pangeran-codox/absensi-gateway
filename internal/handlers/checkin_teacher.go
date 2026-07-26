@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"database/sql"
-	"encoding/json"
-	"net"
 	"net/http"
 	"strings"
 
@@ -29,12 +27,16 @@ type checkinTeacherRequest struct {
 
 func (h *TeacherHandler) CheckinTeacher(w http.ResponseWriter, r *http.Request) {
 	var req checkinTeacherRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_body", "Body request tidak valid")
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	if !validEventTypes[req.EventType] {
 		writeError(w, http.StatusBadRequest, "invalid_event_type", "event_type harus check_in atau check_out")
+		return
+	}
+	if !isValidCoordinate(req.Latitude, req.Longitude) {
+		writeError(w, http.StatusBadRequest, "invalid_coordinates",
+			"latitude harus -90..90 dan longitude harus -180..180")
 		return
 	}
 
@@ -55,7 +57,7 @@ func (h *TeacherHandler) CheckinTeacher(w http.ResponseWriter, r *http.Request) 
 	gpsInRadius := geofence.WithinRadius(req.Latitude, req.Longitude, schoolLat, schoolLng, float64(radiusMeters))
 
 	// --- Validasi 2: jaringan sekolah, berdasarkan IP request (bukan dari body klien) ---
-	clientIP := extractClientIP(r)
+	clientIP := middleware.ClientIP(r)
 	networkRecognized, err := h.isRecognizedNetwork(r, schoolID, clientIP)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Gagal memvalidasi jaringan")
@@ -133,28 +135,18 @@ func (h *TeacherHandler) isRecognizedNetwork(r *http.Request, schoolID, clientIP
 	return false, rows.Err()
 }
 
-// extractClientIP mengambil IP asli klien. Karena service ini berjalan
-// di belakang Nginx Proxy Manager, IP asli ada di header
-// X-Forwarded-For (bukan RemoteAddr yang akan menunjukkan IP proxy).
-// PENTING: header ini HANYA bisa dipercaya kalau reverse proxy di
-// depan gateway sudah dikonfigurasi menimpa (bukan meneruskan mentah)
-// nilai dari klien luar — kalau tidak, klien bisa memalsukan IP-nya
-// sendiri lewat header ini.
-func extractClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
 func joinReasons(reasons []string) string {
 	if len(reasons) == 0 {
 		return ""
 	}
 	return strings.Join(reasons, ",")
+}
+
+// isValidCoordinate mengecek latitude/longitude berada di rentang yang
+// secara fisik mungkin ada di bumi. Ini validasi FORMAT, bukan validasi
+// "GPS ini beneran akurat" — GPS palsu/spoofed yang angkanya tetap masuk
+// rentang wajar tidak akan ketahuan di sini (itu di luar cakupan
+// pengecekan sederhana ini).
+func isValidCoordinate(lat, lng float64) bool {
+	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
 }

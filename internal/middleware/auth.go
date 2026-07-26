@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -45,11 +46,27 @@ func writeJSONError(w http.ResponseWriter, status int, reason, message string) {
 // devices.api_key_hash (SHA-256). Device yang tidak aktif (is_active =
 // false) juga ditolak, supaya device yang dicuri/dinonaktifkan admin
 // langsung berhenti berfungsi tanpa perlu ganti key device lain.
+//
+// Dibatasi juga percobaan gagalnya per IP (lihat attempt_tracker.go) —
+// tanpa ini, orang bisa mencoba menebak-nebak device key berkali-kali
+// tanpa batas.
 func DeviceKeyAuth(dbConn *sql.DB) func(http.Handler) http.Handler {
+	tracker := newAttemptTracker()
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			clientIP := ClientIP(r)
+
+			if locked, retryAfter := tracker.isLocked(clientIP); locked {
+				w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+				writeJSONError(w, http.StatusTooManyRequests, "too_many_attempts",
+					"Terlalu banyak percobaan device key gagal dari jaringan ini, coba lagi nanti")
+				return
+			}
+
 			rawKey := r.Header.Get("X-Device-Key")
 			if rawKey == "" {
+				tracker.recordFailure(clientIP)
 				writeJSONError(w, http.StatusUnauthorized, "missing_device_key", "Header X-Device-Key wajib diisi")
 				return
 			}
@@ -65,13 +82,20 @@ func DeviceKeyAuth(dbConn *sql.DB) func(http.Handler) http.Handler {
 			).Scan(&deviceID, &schoolID, &defaultClassID)
 
 			if err == sql.ErrNoRows {
+				// Ini yang dihitung sebagai "percobaan gagal" — kemungkinan
+				// besar memang usaha menebak key, bukan cuma salah konfigurasi.
+				tracker.recordFailure(clientIP)
 				writeJSONError(w, http.StatusUnauthorized, "invalid_device_key", "Device key tidak valid atau device nonaktif")
 				return
 			}
 			if err != nil {
+				// Error koneksi/database, BUKAN salah device key — jangan
+				// dihitung sebagai percobaan gagal punya penyerang.
 				writeJSONError(w, http.StatusInternalServerError, "internal_error", "Gagal verifikasi device")
 				return
 			}
+
+			tracker.recordSuccess(clientIP)
 
 			ctx := context.WithValue(r.Context(), CtxDeviceID, deviceID)
 			ctx = context.WithValue(ctx, CtxSchoolID, schoolID)

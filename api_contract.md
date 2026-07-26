@@ -235,6 +235,6 @@ Dipakai gateway update `devices.last_seen_at`, juga buat device tahu jam server 
 | 400 | Body request tidak valid/field kurang |
 | 401 | Token/API key tidak valid atau expired |
 | 404 | Kredensial/device/person tidak ditemukan |
-| 409 | Duplicate event (mis. sudah check-in hari ini, coba check-in lagi) |
+| 409 | (belum dipakai) — duplikat scan saat ini ditangani sebagai `accepted_with_flag` + `anomaly_reasons: ["duplicate_scan_within_5s"]`, bukan ditolak. Lihat bagian 1 & 2. |
 | 422 | Validasi bisnis gagal (mis. metode tidak aktif untuk sekolah ini) |
 | 500 | Error internal gateway |
