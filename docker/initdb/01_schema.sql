@@ -34,6 +34,7 @@ CREATE TABLE people_ref (
     school_id       uuid NOT NULL REFERENCES schools_ref(school_id) ON DELETE CASCADE,
     person_type     varchar(20) NOT NULL CHECK (person_type IN ('student', 'teacher', 'staff')),
     full_name       varchar(255) NOT NULL,
+    photo_url       text,                      -- URL foto profil, cache dari Eduzone (nullable — foto opsional)
     class_id        uuid,                      -- khusus student, cache dari classes.id
     grade           varchar(50),
     is_active       boolean NOT NULL DEFAULT true,

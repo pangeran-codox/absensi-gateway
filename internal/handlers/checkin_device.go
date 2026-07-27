@@ -156,7 +156,6 @@ func (h *DeviceHandler) handleSyncCheckin(w http.ResponseWriter, r *http.Request
 	}
 
 	var eventID int64
-	var personName string
 	err = tx.QueryRowContext(r.Context(), `
 		INSERT INTO attendance_events
 			(school_id, device_id, schedule_id, person_id, person_type, method, event_type, is_valid, flagged_reason, raw_payload)
@@ -175,24 +174,39 @@ func (h *DeviceHandler) handleSyncCheckin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Ambil nama untuk response (dari cache people_ref).
+	// Ambil nama & foto untuk response (dari cache people_ref).
+	var personName string
+	var photoURL sql.NullString
 	_ = h.DB.QueryRowContext(r.Context(),
-		`SELECT full_name FROM people_ref WHERE person_id = $1 AND person_type = $2`,
-		personID, personType).Scan(&personName)
+		`SELECT full_name, photo_url FROM people_ref WHERE person_id = $1 AND person_type = $2`,
+		personID, personType).Scan(&personName, &photoURL)
 
 	status := "accepted"
 	if len(anomalyReasons) > 0 {
 		status = "accepted_with_flag"
 	}
 
+	person := map[string]interface{}{
+		"id":   personID,
+		"name": personName,
+		"type": personType,
+	}
+	// photo_url SELALU diisi — foto asli kalau tersedia di people_ref,
+	// kalau tidak (kolom kosong/NULL) pakai avatar inisial yang di-generate
+	// langsung (lihat avatar.go). Sengaja tidak pernah "field ini hilang"
+	// dari response, supaya kiosk/HP/aplikasi apapun konsisten selalu
+	// punya sesuatu untuk ditampilkan tanpa perlu logic fallback sendiri
+	// di tiap klien.
+	if photoURL.Valid && photoURL.String != "" {
+		person["photo_url"] = photoURL.String
+	} else {
+		person["photo_url"] = initialsAvatarDataURI(personName)
+	}
+
 	resp := map[string]interface{}{
 		"status":   status,
 		"event_id": eventID,
-		"person": map[string]string{
-			"id":   personID,
-			"name": personName,
-			"type": personType,
-		},
+		"person":   person,
 	}
 	if scheduleID != "" {
 		resp["schedule_id"] = scheduleID

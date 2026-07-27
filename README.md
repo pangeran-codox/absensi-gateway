@@ -228,7 +228,10 @@ tentu berarti sudah dites end-to-end dengan Postgres beneran):
   `teaching_attendance` di DB utama, sengaja BELUM dibuat di sini.
 - `schedules_ref` & `people_ref` perlu job sync berkala dari DB utama
   Eduzone — belum dibuat, jadi tabel ini masih harus diisi manual untuk
-  testing.
+  testing. `people_ref.photo_url` sudah disiapkan kolomnya (dipakai
+  endpoint check-in device untuk menampilkan foto di kiosk — lihat
+  `api_contract.md`), tapi job sync itu nanti juga harus ikut mengisi
+  kolom ini dari sumber foto profil siswa/guru di Eduzone.
 - **JWT RS256** — lihat bagian Status Keamanan poin 8.
 
 ## Testing

@@ -37,11 +37,18 @@ Dipakai RFID reader / QR kiosk / kamera face-recognition yang terpasang di sekol
 {
   "status": "accepted",
   "event_id": 88123,
-  "person": { "id": "uuid...", "name": "Andi Saputra", "type": "student" },
+  "person": { "id": "uuid...", "name": "Andi Saputra", "type": "student", "photo_url": "https://..." },
   "schedule_id": "uuid...",
   "recorded_at": "2026-07-19T07:00:01+07:00"
 }
 ```
+Field `photo_url` SELALU ada di response — foto asli kalau tersedia di
+cache `people_ref`, atau avatar inisial (SVG data URI, di-generate
+langsung tanpa request ke server lain) kalau orang tersebut belum punya
+foto tersimpan. Jadi kiosk/HP/aplikasi apapun tidak perlu menulis logic
+fallback sendiri-sendiri — selalu ada sesuatu untuk ditampilkan di
+`<img src="...">`.
+
 Field `schedule_id` hanya muncul kalau device terpasang tetap di 1 ruang
 kelas/lab (`devices.default_class_id` terisi) DAN saat ini memang sedang
 ada jam pelajaran aktif untuk kelas tersebut (dicocokkan otomatis lewat
@@ -62,7 +69,7 @@ field ini di response-nya.
 {
   "status": "accepted_with_flag",
   "event_id": 88124,
-  "person": { "id": "uuid...", "name": "Andi Saputra", "type": "student" },
+  "person": { "id": "uuid...", "name": "Andi Saputra", "type": "student", "photo_url": "https://..." },
   "anomaly_reasons": ["duplicate_scan_within_5s"]
 }
 ```

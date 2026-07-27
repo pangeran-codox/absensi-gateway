@@ -21,8 +21,8 @@ INSERT INTO school_networks (school_id, label, ip_or_hostname, is_dynamic, requi
 VALUES ('11111111-1111-1111-1111-111111111111', 'iForte Utama', '103.10.10.10', false, false);
 
 -- Siswa dummy
-INSERT INTO people_ref (person_id, school_id, person_type, full_name)
-VALUES ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'student', 'Andi Saputra (Dummy)');
+INSERT INTO people_ref (person_id, school_id, person_type, full_name, photo_url)
+VALUES ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'student', 'Andi Saputra (Dummy)', 'https://i.pravatar.cc/300?u=andi-saputra-dummy');
 
 -- Kredensial RFID siswa. Raw UID kartu (buat dicoba lewat curl/Postman): CARD-ANDI-001
 INSERT INTO credentials (school_id, person_id, person_type, method, credential_hash)
