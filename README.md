@@ -76,6 +76,11 @@ internal/
     response.go                  — helper writeJSON/writeError/decodeJSONBody/mustJSON/generateJobID
   geofence/geofence.go           — hitung jarak GPS (Haversine) untuk validasi radius sekolah
   scheduling/scheduling.go       — resolve jadwal pelajaran aktif untuk device per-kelas
+  sync/                          — sinkronisasi berkala schools_ref/people_ref/schedules_ref dari Laravel
+    types.go                     — bentuk record yang diharapkan dari API Laravel (kontrak)
+    client.go                    — HTTP client + pagination penjemput data dari Laravel
+    upsert.go                    — upsert hasil fetch ke database
+    puller.go                    — orkestrasi siklus berkala + watermark (ref_sync_state)
 ```
 
 ## Endpoint
@@ -164,6 +169,10 @@ sadar (bukan kelupaan).
 | `DATABASE_URL` | ya | `postgres://user:pass@host:5432/eduzone_absensi?sslmode=disable` | Koneksi ke database `eduzone_absensi` |
 | `JWT_SECRET` | ya | — | Secret HS256, **harus sama** dengan yang dipakai Laravel menerbitkan token guru (lihat catatan risiko di atas) |
 | `TZ` | sangat disarankan | `Asia/Jakarta` | Lihat peringatan timezone di bawah |
+| `SYNC_ENABLED` | tidak (default `false`) | `true` | Aktifkan sinkronisasi berkala dari Laravel — lihat section "Sinkronisasi Data dari Laravel" |
+| `LARAVEL_SYNC_URL` | ya, kalau `SYNC_ENABLED=true` | `http://eduzone_app:80` | Base URL API Laravel (hostname container, bukan lewat NPM) |
+| `LARAVEL_SYNC_TOKEN` | ya, kalau `SYNC_ENABLED=true` | — | Shared secret untuk header `X-Sync-Token` — **beda** dari `JWT_SECRET` |
+| `SYNC_INTERVAL` | tidak (default `5m`) | `5m` | Jarak antar siklus sync, format `time.ParseDuration` Go (mis. `5m`, `1h`). Minimum 1 menit |
 
 Saat dijalankan lewat `docker compose` (lihat bagian Testing di bawah),
 `DATABASE_URL` disusun otomatis dari `POSTGRES_USER`/`POSTGRES_PASSWORD`
@@ -226,13 +235,38 @@ tentu berarti sudah dites end-to-end dengan Postgres beneran):
   harian & per-jam-pelajaran, plus sync ke
   `student_attendance`/`teacher_attendance`/`student_subject_attendance`/
   `teaching_attendance` di DB utama, sengaja BELUM dibuat di sini.
-- `schedules_ref` & `people_ref` perlu job sync berkala dari DB utama
-  Eduzone — belum dibuat, jadi tabel ini masih harus diisi manual untuk
-  testing. `people_ref.photo_url` sudah disiapkan kolomnya (dipakai
-  endpoint check-in device untuk menampilkan foto di kiosk — lihat
-  `api_contract.md`), tapi job sync itu nanti juga harus ikut mengisi
-  kolom ini dari sumber foto profil siswa/guru di Eduzone.
+- `schedules_ref` & `people_ref` sekarang diisi otomatis lewat
+  `internal/sync` — lihat section "Sinkronisasi Data dari Laravel" di
+  bawah untuk status & kontraknya.
 - **JWT RS256** — lihat bagian Status Keamanan poin 8.
+
+## Sinkronisasi Data dari Laravel (`internal/sync`)
+
+`schools_ref`, `people_ref`, `schedules_ref` diisi otomatis lewat
+**pull berkala** dari API Laravel — gateway ini yang aktif menjemput
+tiap `SYNC_INTERVAL` (default 5 menit), bukan Laravel yang mendorong
+data (lihat alasan pemilihan pendekatan ini di riwayat percakapan/PR
+terkait — intinya: pull lebih tahan banting terhadap jalur input data
+Laravel yang beragam — form admin, import massal, seeder — yang tidak
+semuanya tentu memicu event/observer).
+
+**Status: sisi gateway sudah selesai & teruji (unit test, tanpa
+Postgres). Sisi Laravel BELUM dibuat** — endpoint yang harus
+disediakan Laravel, beserta kontrak lengkap request/response, format
+field, dan contoh kerangka kode, ada di
+**[`docs/laravel-sync-contract.md`](docs/laravel-sync-contract.md)**.
+
+Sampai endpoint Laravel-nya siap dan `SYNC_ENABLED=true` di-set,
+gateway berjalan seperti biasa dengan `SYNC_ENABLED=false` (default) —
+`people_ref`/`schools_ref`/`schedules_ref` tetap harus diisi manual
+untuk testing, seperti sebelumnya.
+
+Watermark sinkronisasi (kapan terakhir sukses per resource) dicatat di
+tabel `ref_sync_state` — kalau ingin memaksa full re-sync (tarik ulang
+SEMUA data, bukan cuma yang berubah), kosongkan `last_synced_at`:
+```sql
+UPDATE ref_sync_state SET last_synced_at = NULL;
+```
 
 ## Testing
 

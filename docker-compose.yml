@@ -15,6 +15,12 @@ services:
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/eduzone_absensi?sslmode=disable"
       JWT_SECRET: "${JWT_SECRET}"
       TZ: "Asia/Jakarta"
+      # Default "false" kalau SYNC_ENABLED tidak di-set di .env — gateway
+      # tetap jalan normal tanpa sinkronisasi (lihat docs/laravel-sync-contract.md).
+      SYNC_ENABLED: "${SYNC_ENABLED:-false}"
+      LARAVEL_SYNC_URL: "${LARAVEL_SYNC_URL:-}"
+      LARAVEL_SYNC_TOKEN: "${LARAVEL_SYNC_TOKEN:-}"
+      SYNC_INTERVAL: "${SYNC_INTERVAL:-5m}"
     ports:
       - "8080:8080"
     networks:

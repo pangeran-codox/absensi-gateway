@@ -32,11 +32,39 @@ internal/middleware/        — auth (device key & JWT), rate limit, body size l
 internal/handlers/          — 1 file per grup endpoint (checkin_device, checkin_teacher, dst)
 internal/geofence/          — hitung jarak GPS (Haversine)
 internal/scheduling/         — resolve jadwal pelajaran aktif
+internal/sync/               — pull berkala schools_ref/people_ref/schedules_ref dari Laravel
 ```
 
 Setiap handler baru WAJIB didaftarkan di `main.go` lewat
 `mux.Handle("METHOD /path", chain(middleware...)(http.HandlerFunc(...)))`
 — jangan bikin router/mux baru di file lain.
+
+## Sinkronisasi Data dari Laravel (`internal/sync`)
+
+Gateway ini JEMPUT data dari Laravel secara berkala (pull, bukan push)
+— lihat `docs/laravel-sync-contract.md` untuk kontrak endpoint yang
+harus disediakan Laravel. Kalau menambah tabel `*_ref` baru yang juga
+perlu disinkron dari Laravel:
+
+1. Tambah struct record baru di `internal/sync/types.go`, field JSON-nya
+   HARUS sama persis dengan nama kolom tabel `_ref` tujuan.
+2. Tambah `Fetch<Resource>` di `client.go` (copy pola yang sudah ada,
+   pakai helper pagination yang sama).
+3. Tambah `Upsert<Resource>` di `upsert.go` — WAJIB pakai
+   `ON CONFLICT ... DO UPDATE`, WAJIB dibungkus 1 transaksi.
+4. Tambah `pull<Resource>` di `puller.go`, panggil dari `pullAll` — kalau
+   tabel barunya punya foreign key ke `schools_ref`, taruh urutan
+   panggilannya SETELAH `pullSchools`.
+5. Tambah baris baru ke `ref_sync_state` (lewat migration/schema, resource
+   name baru) supaya watermark-nya tercatat terpisah.
+6. **Update `docs/laravel-sync-contract.md`** — ini kontrak yang harus
+   sinkron dengan sisi Laravel, jangan sampai berubah di sini tanpa
+   dokumentasinya ikut diupdate.
+
+Prinsip yang HARUS dipertahankan: kegagalan sync (Laravel down, dll)
+TIDAK PERNAH boleh membuat gateway berhenti atau menolak check-in — cuma
+di-log dan dicoba lagi siklus berikutnya (lihat `recordFailure` di
+`puller.go` sebagai contoh pola-nya).
 
 ## Aturan Wajib — Menambah Endpoint Baru
 

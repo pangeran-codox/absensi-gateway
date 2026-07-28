@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	_ "time/tzdata" // embed database zoneinfo IANA ke dalam binary — lihat komentar di bawah
@@ -9,6 +10,7 @@ import (
 	"absensi-gateway/internal/db"
 	"absensi-gateway/internal/handlers"
 	"absensi-gateway/internal/middleware"
+	"absensi-gateway/internal/sync"
 )
 
 // Import "time/tzdata" (side-effect only, tidak dipakai langsung) membuat
@@ -53,6 +55,21 @@ func main() {
 	enrollmentHandler := handlers.NewEnrollmentHandler(dbConn)
 	attendanceHandler := handlers.NewAttendanceHandler(dbConn)
 	deviceOpsHandler := handlers.NewDeviceOpsHandler(dbConn)
+
+	// Sinkronisasi data schools_ref/people_ref/schedules_ref dari Laravel,
+	// jalan di goroutine terpisah — TIDAK memblokir HTTP server, dan
+	// kegagalannya (Laravel down, dll) tidak pernah membuat check-in
+	// berhenti berfungsi. Lihat internal/sync dan
+	// docs/laravel-sync-contract.md untuk kontrak endpoint yang harus
+	// disediakan Laravel.
+	if cfg.SyncEnabled {
+		client := sync.NewLaravelClient(cfg.LaravelSyncURL, cfg.LaravelSyncToken)
+		puller := sync.NewPuller(dbConn, client, cfg.SyncInterval)
+		go puller.Run(context.Background())
+		log.Printf("sinkronisasi data AKTIF, interval %s, sumber %s", cfg.SyncInterval, cfg.LaravelSyncURL)
+	} else {
+		log.Print("sinkronisasi data NONAKTIF (SYNC_ENABLED bukan \"true\") — people_ref/schools_ref/schedules_ref harus diisi manual")
+	}
 
 	mux := http.NewServeMux()
 

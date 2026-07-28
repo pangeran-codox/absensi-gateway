@@ -420,6 +420,25 @@ CREATE INDEX idx_presence_tickets_active ON presence_tickets(verifier_id, expire
 -- =====================================================================
 
 -- =====================================================================
+-- ref_sync_state: nyatet progress sinkronisasi MASUK (Laravel -> gateway
+-- ini) untuk schools_ref/people_ref/schedules_ref. Satu baris per jenis
+-- resource. last_synced_at dipakai sebagai watermark "ambil data yang
+-- updated_at-nya lebih baru dari ini" di panggilan berikutnya — supaya
+-- tidak perlu tarik ulang SEMUA data tiap siklus, cukup yang berubah saja.
+-- =====================================================================
+CREATE TABLE ref_sync_state (
+    resource        varchar(30) PRIMARY KEY CHECK (resource IN ('schools', 'people', 'schedules')),
+    last_synced_at  timestamptz,             -- NULL = belum pernah sukses sync sama sekali (tarik semua data)
+    last_status     varchar(20) NOT NULL DEFAULT 'never' CHECK (last_status IN ('never', 'success', 'failed')),
+    last_error      text,
+    last_record_count integer,
+    updated_at      timestamp(0) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO ref_sync_state (resource, last_status) VALUES
+    ('schools', 'never'), ('people', 'never'), ('schedules', 'never');
+
+-- =====================================================================
 -- CATATAN ALUR (untuk implementasi di Maikel/Eduzone nanti):
 --
 -- 1. Device (RFID/QR/Face) -> POST event mentah ke API absensi
