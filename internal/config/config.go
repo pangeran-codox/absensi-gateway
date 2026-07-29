@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -22,6 +23,14 @@ type Config struct {
 	LaravelSyncURL   string
 	LaravelSyncToken string
 	SyncInterval     time.Duration
+
+	// Pengaturan agregasi attendance_events -> attendance_daily — lihat
+	// internal/aggregation. AKTIF secara default (beda dari sync di atas)
+	// karena proses ini murni internal, tidak bergantung pada Laravel atau
+	// koneksi eksternal apapun — aman menyala sejak awal.
+	AggregationEnabled      bool
+	AggregationInterval     time.Duration
+	AggregationLookbackDays int
 }
 
 // Load membaca env var wajib. Kalau ada yang kosong, service langsung
@@ -68,6 +77,31 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("env SYNC_INTERVAL terlalu kecil (%s) — minimum 1 menit", interval)
 		}
 		cfg.SyncInterval = interval
+	}
+
+	// Agregasi AKTIF default true — beda dari sync yang default false,
+	// karena agregasi tidak bergantung pada layanan eksternal apapun.
+	cfg.AggregationEnabled = getEnvOrDefault("AGGREGATION_ENABLED", "true") == "true"
+	if cfg.AggregationEnabled {
+		intervalStr := getEnvOrDefault("AGGREGATION_INTERVAL", "1m")
+		interval, err := time.ParseDuration(intervalStr)
+		if err != nil {
+			return nil, fmt.Errorf("env AGGREGATION_INTERVAL tidak valid (%q): %w", intervalStr, err)
+		}
+		if interval < 10*time.Second {
+			return nil, fmt.Errorf("env AGGREGATION_INTERVAL terlalu kecil (%s) — minimum 10 detik", interval)
+		}
+		cfg.AggregationInterval = interval
+
+		lookbackStr := getEnvOrDefault("AGGREGATION_LOOKBACK_DAYS", "2")
+		lookback, err := strconv.Atoi(lookbackStr)
+		if err != nil {
+			return nil, fmt.Errorf("env AGGREGATION_LOOKBACK_DAYS tidak valid (%q): %w", lookbackStr, err)
+		}
+		if lookback < 1 {
+			return nil, fmt.Errorf("env AGGREGATION_LOOKBACK_DAYS harus minimal 1, dapat %d", lookback)
+		}
+		cfg.AggregationLookbackDays = lookback
 	}
 
 	return cfg, nil

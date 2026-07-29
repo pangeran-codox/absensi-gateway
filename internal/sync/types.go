@@ -9,13 +9,18 @@ import "time"
 
 // SchoolRecord — satu baris dari GET /api/internal/sync/schools.
 type SchoolRecord struct {
-	SchoolID              string    `json:"school_id"`
-	Name                  string    `json:"name"`
-	Latitude              float64   `json:"latitude"`
-	Longitude             float64   `json:"longitude"`
-	GeofenceRadiusMeters  int       `json:"geofence_radius_meters"`
-	IsActive              bool      `json:"is_active"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	SchoolID             string    `json:"school_id"`
+	Name                 string    `json:"name"`
+	Latitude             float64   `json:"latitude"`
+	Longitude            float64   `json:"longitude"`
+	GeofenceRadiusMeters int       `json:"geofence_radius_meters"`
+	// LateCutoffTime format "HH:MM:SS", NULLABLE (pointer) — sekolah yang
+	// belum mengatur jam masuk di Laravel akan mengirim null di sini, dan
+	// agregasi absen di gateway tidak akan menandai siapa pun "Terlambat"
+	// untuk sekolah itu (cuma Hadir) sampai nilainya diisi.
+	LateCutoffTime *string   `json:"late_cutoff_time"`
+	IsActive       bool      `json:"is_active"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // PersonRecord — satu baris dari GET /api/internal/sync/people.

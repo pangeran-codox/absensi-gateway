@@ -76,6 +76,7 @@ internal/
     response.go                  — helper writeJSON/writeError/decodeJSONBody/mustJSON/generateJobID
   geofence/geofence.go           — hitung jarak GPS (Haversine) untuk validasi radius sekolah
   scheduling/scheduling.go       — resolve jadwal pelajaran aktif untuk device per-kelas
+  aggregation/aggregation.go     — agregasi attendance_events -> attendance_daily secara berkala
   sync/                          — sinkronisasi berkala schools_ref/people_ref/schedules_ref dari Laravel
     types.go                     — bentuk record yang diharapkan dari API Laravel (kontrak)
     client.go                    — HTTP client + pagination penjemput data dari Laravel
@@ -173,6 +174,9 @@ sadar (bukan kelupaan).
 | `LARAVEL_SYNC_URL` | ya, kalau `SYNC_ENABLED=true` | `http://eduzone_app:80` | Base URL API Laravel (hostname container, bukan lewat NPM) |
 | `LARAVEL_SYNC_TOKEN` | ya, kalau `SYNC_ENABLED=true` | — | Shared secret untuk header `X-Sync-Token` — **beda** dari `JWT_SECRET` |
 | `SYNC_INTERVAL` | tidak (default `5m`) | `5m` | Jarak antar siklus sync, format `time.ParseDuration` Go (mis. `5m`, `1h`). Minimum 1 menit |
+| `AGGREGATION_ENABLED` | tidak (default `true`) | `true` | Aktifkan agregasi `attendance_events` → `attendance_daily` — lihat section "Agregasi Absen Harian" |
+| `AGGREGATION_INTERVAL` | tidak (default `1m`) | `1m` | Jarak antar siklus agregasi. Minimum 10 detik |
+| `AGGREGATION_LOOKBACK_DAYS` | tidak (default `2`) | `2` | Berapa hari ke belakang dihitung ulang tiap siklus |
 
 Saat dijalankan lewat `docker compose` (lihat bagian Testing di bawah),
 `DATABASE_URL` disusun otomatis dari `POSTGRES_USER`/`POSTGRES_PASSWORD`
@@ -230,15 +234,40 @@ tentu berarti sudah dites end-to-end dengan Postgres beneran):
 - Hash chaining, device signing (Ed25519), QR token rotating,
   correction log approval flow — semua kolom/tabel sudah disiapkan di
   skema, logikanya belum diaktifkan di gateway ini.
-- **Agregasi ke `attendance_daily` & `attendance_period`** — gateway ini
-  cuma menulis raw event ke `attendance_events`. Proses agregasi
-  harian & per-jam-pelajaran, plus sync ke
-  `student_attendance`/`teacher_attendance`/`student_subject_attendance`/
-  `teaching_attendance` di DB utama, sengaja BELUM dibuat di sini.
+- **Agregasi ke `attendance_period`** (per jam pelajaran, bukan per hari)
+  dan sync hasil absen ke `student_attendance`/`teacher_attendance`/
+  `student_subject_attendance`/`teaching_attendance` di DB utama Eduzone
+  — sengaja BELUM dibuat. `attendance_daily` (agregat HARIAN) sudah
+  jalan otomatis — lihat section "Agregasi Absen Harian" di bawah.
 - `schedules_ref` & `people_ref` sekarang diisi otomatis lewat
   `internal/sync` — lihat section "Sinkronisasi Data dari Laravel" di
   bawah untuk status & kontraknya.
 - **JWT RS256** — lihat bagian Status Keamanan poin 8.
+
+## Agregasi Absen Harian (`internal/aggregation`)
+
+`attendance_events` (log mentah tiap tap) dirangkum otomatis jadi
+`attendance_daily` (1 baris per orang per hari) tiap `AGGREGATION_INTERVAL`
+(default 1 menit) — **AKTIF secara default**, tidak seperti sinkronisasi
+Laravel di atas, karena proses ini murni internal (baca-tulis ke database
+gateway sendiri), tidak bergantung layanan eksternal apapun.
+
+Yang dihitung: `first_check_in`, `last_check_out`, `primary_method`,
+`total_events`, `has_anomaly`. Status cuma dibedakan **Hadir vs
+Terlambat** — Terlambat HANYA muncul kalau `schools_ref.late_cutoff_time`
+sudah terisi (lihat section sinkronisasi) DAN ada check-in valid yang
+lebih lambat dari jam itu. Status **Sakit/Izin/Alpa** SENGAJA tidak
+pernah ditentukan gateway ini — itu keputusan administratif yang
+datanya (surat izin, siapa yang seharusnya hadir) cuma ada di Laravel;
+nanti ditentukan lewat proses sync balik (masih di daftar stub di
+atas), bukan ditebak dari data tap-kartu.
+
+Query-nya **idempotent** — aman dijalankan ulang untuk rentang tanggal
+yang sama, hasilnya selalu dihitung ulang dari `attendance_events` yang
+sebenarnya (bukan ditambah incremental). Mau paksa recompute manual,
+tinggal jalankan ulang query yang sama di `internal/aggregation/aggregation.go`
+(`aggregationQuery`) lewat `psql`, atau restart gateway (siklus pertama
+jalan segera saat startup).
 
 ## Sinkronisasi Data dari Laravel (`internal/sync`)
 

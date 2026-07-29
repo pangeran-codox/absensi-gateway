@@ -67,7 +67,8 @@ siklus sync berikutnya (bukan cuma pas full-sync pertama).
 
 ## 1. `GET /api/internal/sync/schools`
 
-Data sekolah untuk geofencing GPS check-in guru.
+Data sekolah untuk geofencing GPS check-in guru, dan untuk menentukan
+status Terlambat pada agregasi absen harian.
 
 **Contoh response:**
 ```json
@@ -78,6 +79,7 @@ Data sekolah untuk geofencing GPS check-in guru.
     "latitude": -7.7956,
     "longitude": 113.7108,
     "geofence_radius_meters": 150,
+    "late_cutoff_time": "07:15:00",
     "is_active": true,
     "updated_at": "2026-07-20T08:30:00+07:00"
   }
@@ -90,8 +92,14 @@ Data sekolah untuk geofencing GPS check-in guru.
 | `name` | string | Wajib |
 | `latitude`, `longitude` | number | Wajib, titik pusat sekolah |
 | `geofence_radius_meters` | integer | Wajib, radius toleransi GPS dalam meter |
+| `late_cutoff_time` | string `"HH:MM:SS"` atau `null` | Opsional — batas jam masuk sebelum dianggap Terlambat. Kirim `null` kalau sekolah belum mengatur jam masuk di Laravel; gateway TIDAK akan menandai siapa pun Terlambat sampai field ini terisi (aman, tidak salah label) |
 | `is_active` | boolean | Wajib |
 | `updated_at` | string (RFC3339) | Wajib — dipakai gateway sebagai watermark sync berikutnya |
+
+**Kenapa bukan diatur manual di gateway:** supaya admin cuma perlu
+mengatur jam masuk sekolah **1 kali, di 1 tempat** (Laravel) — nilainya
+mengalir otomatis ke gateway lewat sinkronisasi berkala ini, gateway
+tidak pernah punya kolom yang harus diisi manual terpisah dari Laravel.
 
 ## 2. `GET /api/internal/sync/people`
 
@@ -236,6 +244,7 @@ public function schools(Request $request)
             'latitude'               => (float) $s->latitude,
             'longitude'              => (float) $s->longitude,
             'geofence_radius_meters' => $s->geofence_radius_meters ?? 150,
+            'late_cutoff_time'       => $s->late_cutoff_time, // null kalau belum diatur, jangan kasih default
             'is_active'              => (bool) $s->is_active,
             'updated_at'             => $s->updated_at->toRfc3339String(),
         ])

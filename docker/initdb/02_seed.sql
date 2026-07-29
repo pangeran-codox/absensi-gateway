@@ -13,8 +13,8 @@ SET timezone = 'Asia/Jakarta';
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Sekolah dummy (koordinat: contoh titik di Surabaya)
-INSERT INTO schools_ref (school_id, name, latitude, longitude, geofence_radius_meters)
-VALUES ('11111111-1111-1111-1111-111111111111', 'Sekolah Test', -7.257472, 112.752090, 150);
+INSERT INTO schools_ref (school_id, name, latitude, longitude, geofence_radius_meters, late_cutoff_time)
+VALUES ('11111111-1111-1111-1111-111111111111', 'Sekolah Test', -7.257472, 112.752090, 150, '07:15:00');
 
 -- Jaringan sekolah (contoh IP, ganti sesuai kebutuhan testing)
 INSERT INTO school_networks (school_id, label, ip_or_hostname, is_dynamic, requires_local_verifier)

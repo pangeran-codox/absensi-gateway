@@ -27,13 +27,14 @@ func UpsertSchools(ctx context.Context, db *sql.DB, records []SchoolRecord) erro
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO schools_ref
-			(school_id, name, latitude, longitude, geofence_radius_meters, is_active, synced_at)
-		VALUES ($1, $2, $3, $4, $5, $6, now())
+			(school_id, name, latitude, longitude, geofence_radius_meters, late_cutoff_time, is_active, synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 		ON CONFLICT (school_id) DO UPDATE SET
 			name                   = EXCLUDED.name,
 			latitude               = EXCLUDED.latitude,
 			longitude              = EXCLUDED.longitude,
 			geofence_radius_meters = EXCLUDED.geofence_radius_meters,
+			late_cutoff_time       = EXCLUDED.late_cutoff_time,
 			is_active              = EXCLUDED.is_active,
 			synced_at              = now()
 	`)
@@ -44,7 +45,7 @@ func UpsertSchools(ctx context.Context, db *sql.DB, records []SchoolRecord) erro
 
 	for _, r := range records {
 		if _, err := stmt.ExecContext(ctx,
-			r.SchoolID, r.Name, r.Latitude, r.Longitude, r.GeofenceRadiusMeters, r.IsActive,
+			r.SchoolID, r.Name, r.Latitude, r.Longitude, r.GeofenceRadiusMeters, r.LateCutoffTime, r.IsActive,
 		); err != nil {
 			return fmt.Errorf("gagal upsert school %s: %w", r.SchoolID, err)
 		}

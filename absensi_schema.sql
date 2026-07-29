@@ -25,6 +25,13 @@ CREATE TABLE schools_ref (
     latitude                numeric(10, 7) NOT NULL,  -- titik pusat sekolah, untuk geofencing GPS guru
     longitude               numeric(10, 7) NOT NULL,
     geofence_radius_meters  integer NOT NULL DEFAULT 150,
+    late_cutoff_time        time,               -- batas jam masuk sebelum dianggap Terlambat.
+                                                   -- NULLABLE DENGAN SENGAJA: kalau NULL (sekolah belum
+                                                   -- set / belum sempat sync), agregasi absen TIDAK PERNAH
+                                                   -- menandai Terlambat, cuma Hadir — supaya tidak salah
+                                                   -- label tanpa data yang jelas. Diisi OTOMATIS lewat
+                                                   -- internal/sync dari Laravel, BUKAN diisi manual di sini
+                                                   -- (satu sumber kebenaran: admin set sekali di Laravel).
     is_active               boolean NOT NULL DEFAULT true,
     synced_at               timestamp(0) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

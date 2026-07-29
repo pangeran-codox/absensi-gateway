@@ -6,6 +6,7 @@ import (
 	"net/http"
 	_ "time/tzdata" // embed database zoneinfo IANA ke dalam binary — lihat komentar di bawah
 
+	"absensi-gateway/internal/aggregation"
 	"absensi-gateway/internal/config"
 	"absensi-gateway/internal/db"
 	"absensi-gateway/internal/handlers"
@@ -69,6 +70,17 @@ func main() {
 		log.Printf("sinkronisasi data AKTIF, interval %s, sumber %s", cfg.SyncInterval, cfg.LaravelSyncURL)
 	} else {
 		log.Print("sinkronisasi data NONAKTIF (SYNC_ENABLED bukan \"true\") — people_ref/schools_ref/schedules_ref harus diisi manual")
+	}
+
+	// Agregasi attendance_events -> attendance_daily, juga di goroutine
+	// terpisah. Ini murni internal (tidak bergantung Laravel), jadi tetap
+	// jalan normal walau sinkronisasi di atas sedang bermasalah.
+	if cfg.AggregationEnabled {
+		aggregator := aggregation.NewAggregator(dbConn, cfg.AggregationInterval, cfg.AggregationLookbackDays)
+		go aggregator.Run(context.Background())
+		log.Printf("agregasi absen harian AKTIF, interval %s, lookback %d hari", cfg.AggregationInterval, cfg.AggregationLookbackDays)
+	} else {
+		log.Print("agregasi absen harian NONAKTIF (AGGREGATION_ENABLED=false) — attendance_daily tidak akan terisi otomatis")
 	}
 
 	mux := http.NewServeMux()
