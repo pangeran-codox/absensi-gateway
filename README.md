@@ -206,9 +206,11 @@ image yang lebih minimal.
 ## Status Implementasi Fitur
 
 Sudah jalan (dibangun & lolos `go build`/`go vet`/`go test` — belum
-tentu berarti sudah dites end-to-end dengan Postgres beneran):
+tentu berarti sudah dites end-to-end dengan Postgres beneran, kecuali
+disebutkan eksplisit sudah dites manual):
 
-- Check-in RFID & QR sinkron (hash-based matching)
+- Check-in RFID & QR sinkron (hash-based matching) — **sudah dites
+  manual end-to-end** (kiosk browser + curl, lihat riwayat testing)
 - Check-in Face — endpoint & job-polling ada, **tapi worker
   pengenalan wajahnya sendiri belum ada** (lihat bagian "Masih stub")
 - Check-in guru (GPS radius + whitelist jaringan sekolah)
@@ -219,6 +221,19 @@ tentu berarti sudah dites end-to-end dengan Postgres beneran):
   (mis. RFID reader tetap di Lab Komputer) otomatis mendeteksi jadwal
   aktif (`schedules_ref`) dan menandai event dengan `schedule_id`.
   Device umum (mis. gerbang) tidak terpengaruh, tetap absen harian biasa.
+- Foto/avatar di response check-in device — foto asli dari `people_ref`
+  kalau ada, avatar inisial (SVG inline, tanpa request eksternal) kalau
+  tidak ada. Field `photo_url` di response SELALU terisi salah satunya.
+- **Agregasi harian** (`attendance_events` → `attendance_daily`) — AKTIF
+  otomatis, termasuk deteksi status Terlambat berbasis
+  `schools_ref.late_cutoff_time`. **Sudah dites manual** (tap RFID lewat
+  jam cutoff, dicek hasilnya lewat `psql`).
+- **Modul sync dari Laravel** (`internal/sync`) — kode gateway-nya
+  sudah selesai & lolos unit test, TAPI endpoint yang harus disediakan
+  Laravel belum dibuat (lihat `docs/laravel-sync-contract.md`) —
+  jadi secara PRAKTIS `people_ref`/`schools_ref`/`schedules_ref` masih
+  harus diisi manual sampai sisi Laravel-nya jadi. Default nonaktif
+  (`SYNC_ENABLED=false`).
 
 **Masih stub/belum diimplementasikan (sengaja, menunggu komponen lain siap):**
 
@@ -237,12 +252,37 @@ tentu berarti sudah dites end-to-end dengan Postgres beneran):
 - **Agregasi ke `attendance_period`** (per jam pelajaran, bukan per hari)
   dan sync hasil absen ke `student_attendance`/`teacher_attendance`/
   `student_subject_attendance`/`teaching_attendance` di DB utama Eduzone
-  — sengaja BELUM dibuat. `attendance_daily` (agregat HARIAN) sudah
-  jalan otomatis — lihat section "Agregasi Absen Harian" di bawah.
-- `schedules_ref` & `people_ref` sekarang diisi otomatis lewat
-  `internal/sync` — lihat section "Sinkronisasi Data dari Laravel" di
-  bawah untuk status & kontraknya.
+  — sengaja BELUM dibuat.
+- Endpoint API Laravel untuk `internal/sync` (lihat poin di atas) —
+  kontraknya sudah lengkap, implementasinya PR terpisah, di luar repo ini.
 - **JWT RS256** — lihat bagian Status Keamanan poin 8.
+
+## Status Kesiapan Keseluruhan
+
+Ringkasan jujur, supaya tidak ada yang menganggap ini "produk jadi"
+padahal belum:
+
+**Siap untuk testing/development lokal & pilot skala kecil:**
+modul RFID/QR, check-in guru, agregasi harian — sudah dites end-to-end
+manual (kiosk, curl, query database langsung), 20+ unit test lolos,
+7 celah keamanan yang ditemukan sudah diperbaiki + diuji.
+
+**BELUM siap disebut "production-ready"**, alasannya:
+- Belum ada load testing (belum pernah dicoba banyak device
+  nge-hit bersamaan, cuma diuji satu-satu manual)
+- JWT masih shared-secret (HS256) — risiko yang didokumentasikan,
+  sengaja belum diperbaiki (lihat Status Keamanan poin 8)
+- Semua alur yang menyentuh Postgres divalidasi lewat `go build`/`go
+  vet` (kompilasi & tipe data benar) dan testing manual oleh pengguna
+  — BUKAN oleh automated integration test terhadap Postgres beneran
+  (lingkungan development yang dipakai untuk membangun ini tidak
+  punya akses Docker/Postgres)
+
+**Belum dikerjakan sama sekali** (bukan cuma stub kosong, tapi memang
+di luar cakupan sampai saat ini): Face Recognition (worker Python),
+sinkronisasi 2 arah penuh ke Laravel (baru arah masuk yang siap kode
+gateway-nya, arah keluar/hasil absen ke Laravel belum ada), agregasi
+per-jam-pelajaran, endpoint sync di sisi Laravel.
 
 ## Agregasi Absen Harian (`internal/aggregation`)
 
@@ -312,13 +352,19 @@ Cakupan test saat ini:
   `attemptTracker` (lockout brute-force device key)
 - `internal/handlers`: kepemilikan job face-recognition
   (`GetFaceJobResult`), validasi rentang koordinat GPS
-  (`isValidCoordinate`)
+  (`isValidCoordinate`), generator avatar inisial (`initialsAvatarDataURI`)
+- `internal/sync`: pagination & auth `LaravelClient` (pakai server
+  tiruan `httptest`, tidak perlu Laravel beneran), perhitungan watermark
+  (`maxUpdatedAt`)
+- `internal/aggregation`: perhitungan rentang tanggal lookback
+  (`lookbackStartDate`)
 
 Belum ada test yang butuh Postgres beneran (integration test) — semua
-alur yang menyentuh database (check-in RFID/QR, enrollment, dll) baru
-tervalidasi lewat `go build`/`go vet` (kompilasi & tipe data benar),
-BUKAN lewat eksekusi nyata terhadap database. Sebelum deploy ke
-production, tetap perlu smoke test manual pakai Docker Compose (lihat
+alur yang menyentuh database (check-in RFID/QR, enrollment, agregasi,
+upsert sync, dll) baru tervalidasi lewat `go build`/`go vet` (kompilasi
+& tipe data benar) plus testing manual oleh pengguna lewat Docker
+Compose — BUKAN lewat automated test terhadap database beneran.
+Sebelum deploy ke production, tetap perlu smoke test manual (lihat
 bagian di bawah).
 
 ## Testing Lokal Pakai Docker Compose
@@ -376,6 +422,13 @@ curl -X POST http://localhost:8080/api/v1/checkin/device \
   -H "Content-Type: application/json" \
   -H "X-Device-Key: DEVKEY-LAB-01" \
   -d '{"method":"rfid","event_type":"check_in","credential_value":"CARD-ANDI-001"}'
+```
+
+**Cek hasil agregasi harian** (tunggu maksimal 1 menit setelah tap,
+sebelum jam 07:15 hasilnya `Hadir`, setelah itu `Terlambat` — sesuai
+`late_cutoff_time` di seed data):
+```powershell
+docker exec -it postgres psql -U <user> -d eduzone_absensi -c "SELECT person_id, date, first_check_in, status FROM attendance_daily;"
 ```
 
 **Reset data test** (hapus & bikin ulang database di container Postgres
