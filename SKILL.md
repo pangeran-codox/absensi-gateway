@@ -33,11 +33,34 @@ internal/handlers/          — 1 file per grup endpoint (checkin_device, checki
 internal/geofence/          — hitung jarak GPS (Haversine)
 internal/scheduling/         — resolve jadwal pelajaran aktif
 internal/sync/               — pull berkala schools_ref/people_ref/schedules_ref dari Laravel
+internal/aggregation/        — agregasi berkala attendance_events -> attendance_daily
 ```
 
 Setiap handler baru WAJIB didaftarkan di `main.go` lewat
 `mux.Handle("METHOD /path", chain(middleware...)(http.HandlerFunc(...)))`
 — jangan bikin router/mux baru di file lain.
+
+## Agregasi Absen Harian (`internal/aggregation`)
+
+Beda dari `internal/sync` (bergantung Laravel hidup), agregasi ini murni
+baca-tulis ke database gateway sendiri — AKTIF secara default
+(`AGGREGATION_ENABLED=true`), bukan opt-in seperti sync. Kalau menambah
+kolom baru ke `attendance_daily` yang perlu dihitung dari
+`attendance_events`:
+
+1. Update `aggregationQuery` di `internal/aggregation/aggregation.go` —
+   ingat query ini WAJIB tetap idempotent (aman dijalankan ulang untuk
+   rentang tanggal yang sama, hasilnya selalu FULL RECOMPUTE dari
+   `attendance_events`, bukan increment).
+2. Kalau kolom barunya butuh data dari `schools_ref` (seperti
+   `late_cutoff_time` untuk status Terlambat), JOIN ke `schools_ref` dan
+   masukkan kolom itu ke `GROUP BY` juga (Postgres tidak otomatis
+   mengenali functional dependency lintas tabel via JOIN).
+3. **JANGAN** membuat agregasi ini menentukan status yang butuh data di
+   luar `attendance_events`/`schools_ref` (mis. Sakit/Izin/Alpa yang
+   butuh data surat izin) — itu keputusan Laravel, bukan gateway. Kalau
+   ada kebutuhan begitu, itu masuk ke proses "sync balik ke Laravel"
+   (masih stub), bukan ditambahkan ke sini.
 
 ## Sinkronisasi Data dari Laravel (`internal/sync`)
 
