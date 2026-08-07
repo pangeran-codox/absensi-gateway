@@ -56,6 +56,7 @@ func main() {
 	enrollmentHandler := handlers.NewEnrollmentHandler(dbConn)
 	attendanceHandler := handlers.NewAttendanceHandler(dbConn)
 	deviceOpsHandler := handlers.NewDeviceOpsHandler(dbConn)
+	healthHandler := handlers.NewHealthHandler(dbConn)
 
 	// Sinkronisasi data schools_ref/people_ref/schedules_ref dari Laravel,
 	// jalan di goroutine terpisah — TIDAK memblokir HTTP server, dan
@@ -90,6 +91,10 @@ func main() {
 	// pengaman terhadap body request raksasa yang bisa bikin server
 	// kehabisan memori (DoS) — lihat komentar di internal/middleware/bodylimit.go.
 	// Ukurannya beda-beda tergantung payload wajar tiap endpoint.
+
+	// --- Health check (tanpa auth — dipakai Laravel/monitoring untuk cek gateway hidup) ---
+	mux.Handle("GET /health",
+		chain(middleware.MaxBodySize(middleware.SizeSmall))(http.HandlerFunc(healthHandler.Handle)))
 
 	// --- Endpoint device tetap (RFID/QR/Face) ---
 	// SizeImage dipakai karena endpoint ini juga menerima foto (face check-in).
