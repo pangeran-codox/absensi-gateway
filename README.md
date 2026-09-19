@@ -9,6 +9,25 @@ tinggi & latency rendah.
 Lihat `api_contract.md` untuk detail kontrak request/response tiap
 endpoint, dan `absensi_schema.sql` untuk skema database lengkap.
 
+**Butuh ringkasan cepat "gateway ini sekarang bisa apa aja" dan "apa
+yang harus dibuat di Laravel supaya semuanya jalan penuh"?** Baca
+[`docs/status-dan-tugas-laravel.md`](docs/status-dan-tugas-laravel.md)
+— dokumen itu jawaban langsung untuk 2 pertanyaan itu, tanpa perlu
+baca seluruh README ini.
+
+**Mau mulai testing/debugging pakai data sekolah asli (bukan
+dummy)?** Baca
+[`docs/kesiapan-testing-data-asli.md`](docs/kesiapan-testing-data-asli.md)
+— matriks kesiapan tiap endpoint, cara isi data asli (termasuk tabel
+yang belum punya endpoint API, harus lewat `psql` manual), dan daftar
+risiko yang belum pernah teruji.
+
+**Mau audit sebelum deploy ke production beneran?** Baca
+[`docs/audit-kesiapan-production.md`](docs/audit-kesiapan-production.md)
+— daftar lengkap per kategori (keamanan, keandalan server,
+observability, database, performa, Docker, privasi data, testing),
+masing-masing dengan standar kesiapan & status sekarang.
+
 ## Kenapa service terpisah dari Eduzone (Laravel)
 
 Absensi diperkirakan jadi endpoint dengan trafik paling padat (ratusan
@@ -73,10 +92,14 @@ internal/
     enrollment.go                — POST /enrollment/credentials (admin, daftar kredensial RFID/QR)
     attendance.go                — GET /attendance/daily (query status agregat)
     device_ops.go                — POST /devices/heartbeat
+    media.go                     — GET /media/photo/{person_id} (proxy + cache foto dari Laravel)
     response.go                  — helper writeJSON/writeError/decodeJSONBody/mustJSON/generateJobID
   geofence/geofence.go           — hitung jarak GPS (Haversine) untuk validasi radius sekolah
   scheduling/scheduling.go       — resolve jadwal pelajaran aktif untuk device per-kelas
   aggregation/aggregation.go     — agregasi attendance_events -> attendance_daily secara berkala
+  media/                         — cache disk + fetch foto profil dari Laravel
+    cache.go                     — DiskCache, invalidasi via people_ref.synced_at
+    fetch.go                     — HTTP client pengambil foto dari Laravel (dengan batas ukuran & timeout)
   sync/                          — sinkronisasi berkala schools_ref/people_ref/schedules_ref dari Laravel
     types.go                     — bentuk record yang diharapkan dari API Laravel (kontrak)
     client.go                    — HTTP client + pagination penjemput data dari Laravel
@@ -94,6 +117,7 @@ internal/
 | `POST /api/v1/checkin/teacher` | JWT (Bearer) | Check-in guru — validasi GPS radius + IP jaringan sekolah |
 | `GET /api/v1/attendance/daily` | JWT (Bearer) | Query status absensi harian per `person_id` |
 | `POST /api/v1/enrollment/credentials` | JWT (Bearer, role admin) | Daftarkan kredensial RFID/QR baru (Face: belum aktif) |
+| `GET /api/v1/media/photo/{person_id}` | **Tanpa auth** (sengaja — lihat catatan di `api_contract.md`) | Proxy + cache foto profil dari Laravel, buat dipakai langsung di `<img src>` |
 
 ## Status Keamanan
 
@@ -161,6 +185,17 @@ sadar (bukan kelupaan).
 - `detectAnomalies` (deteksi duplicate scan) tidak scoping eksplisit ke
   `school_id` — mengandalkan `person_id` unik lintas sekolah. Aman
   selama asumsi itu benar, tapi bukan defense-in-depth penuh.
+- **`GET /api/v1/media/photo/{person_id}` sengaja TANPA autentikasi** —
+  keputusan sadar (9 Sept 2026), bukan kelupaan: tag `<img src>` di
+  HTML tidak bisa mengirim header custom (`Authorization`/
+  `X-Device-Key`), jadi endpoint ini mengandalkan `person_id` berupa
+  UUID yang praktis tidak bisa ditebak, plus jaringan yang sudah
+  dibatasi lewat NPM, sebagai satu-satunya lapisan perlindungan. Ini
+  foto siswa/guru (termasuk anak di bawah umur) — kalau kebutuhan
+  keamanannya berubah nanti, opsi yang tersedia: token sementara
+  disisipkan di URL (bukan header), atau signed URL dengan masa
+  berlaku pendek. Lihat `docs/audit-kesiapan-production.md` bagian G
+  (Privasi Data) untuk konteks kenapa ini perlu perhatian ekstra.
 
 ## Konfigurasi (Environment Variable)
 
@@ -177,6 +212,7 @@ sadar (bukan kelupaan).
 | `AGGREGATION_ENABLED` | tidak (default `true`) | `true` | Aktifkan agregasi `attendance_events` → `attendance_daily` — lihat section "Agregasi Absen Harian" |
 | `AGGREGATION_INTERVAL` | tidak (default `1m`) | `1m` | Jarak antar siklus agregasi. Minimum 10 detik |
 | `AGGREGATION_LOOKBACK_DAYS` | tidak (default `2`) | `2` | Berapa hari ke belakang dihitung ulang tiap siklus |
+| `PHOTO_CACHE_DIR` | tidak (default `/data/photo-cache`) | `/data/photo-cache` | Folder cache foto profil (lihat `internal/media`). Di-mount ke Docker volume `photo-cache` di `docker-compose.yml` supaya persisten antar restart |
 
 Saat dijalankan lewat `docker compose` (lihat bagian Testing di bawah),
 `DATABASE_URL` disusun otomatis dari `POSTGRES_USER`/`POSTGRES_PASSWORD`
@@ -226,8 +262,12 @@ disebutkan eksplisit sudah dites manual):
   tidak ada. Field `photo_url` di response SELALU terisi salah satunya.
 - **Agregasi harian** (`attendance_events` → `attendance_daily`) — AKTIF
   otomatis, termasuk deteksi status Terlambat berbasis
-  `schools_ref.late_cutoff_time`. **Sudah dites manual** (tap RFID lewat
-  jam cutoff, dicek hasilnya lewat `psql`).
+  `schools_ref.late_cutoff_time`. Sempat ada bug (`INSERT` 11 kolom
+  tapi `SELECT` cuma 10 nilai, kolom `updated_at` kelewat) yang baru
+  ketahuan saat testing manual — sudah diperbaiki, tapi BELUM dites
+  ulang terhadap Postgres beneran setelah fix ini (lihat bagian
+  Troubleshooting soal kenapa `go build` tidak bisa mendeteksi bug
+  jenis ini). Tes ulang manual sebelum dianggap final.
 - **Modul sync dari Laravel** (`internal/sync`) — kode gateway-nya
   sudah selesai & lolos unit test, TAPI endpoint yang harus disediakan
   Laravel belum dibuat (lihat `docs/laravel-sync-contract.md`) —
@@ -484,3 +524,50 @@ Jalankan `absensi_schema.sql` (folder sebelah) ke database
 ```bash
 psql -h <host> -U <user> -d eduzone_absensi -f absensi_schema.sql
 ```
+
+## Troubleshooting — Masalah yang Pernah Kejadian
+
+Dua catatan ini dari pengalaman nyata testing lokal, dicatat di sini
+supaya tidak keulang lagi.
+
+**1. `docker compose restart` TIDAK menarik perubahan kode baru.**
+
+Kalau kamu baru extract zip project versi terbaru (ada perubahan file
+`.go`), `docker compose restart absensi-gateway` **tidak cukup** —
+container itu cuma di-restart pakai image LAMA yang sudah ke-build
+sebelumnya, kode barunya tidak ikut ter-compile ulang. Gejalanya:
+error yang harusnya sudah kefix masih muncul terus di log, padahal
+file lokal sudah benar.
+
+**Solusi:** build ulang image-nya secara eksplisit, jangan cuma restart:
+```powershell
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+`restart` hanya tepat dipakai untuk perubahan yang TIDAK menyentuh kode
+Go — misalnya cuma ganti isi `.env` yang sudah ada variabelnya
+(walaupun untuk env var BARU yang belum pernah ada di compose
+sebelumnya, tetap lebih aman `down` lalu `up -d` ulang).
+
+**2. Query SQL yang jumlah kolomnya tidak dicek otomatis oleh
+`go build`.**
+
+`go build`/`go vet` HANYA memvalidasi bahwa kode Go-nya sendiri benar
+(sintaks, tipe data Go) — keduanya **tidak pernah membuka atau
+memvalidasi isi string SQL** di dalam kode (query di
+`internal/aggregation/aggregation.go` dan `internal/sync/upsert.go`
+itu di mata Go compiler cuma "sebuah string", bukan SQL). Jadi
+kesalahan seperti jumlah kolom di `INSERT INTO ... (a, b, c)` tidak
+sama dengan jumlah nilai di `SELECT` (atau `VALUES`) — persis seperti
+yang pernah kejadian di `aggregationQuery`, errornya
+`pq: INSERT has more target columns than expressions` — **baru
+ketahuan saat query itu benar-benar dieksekusi ke Postgres**, bukan
+saat `go build`. Klaim "sudah `go build` bersih" TIDAK PERNAH berarti
+query SQL-nya juga pasti benar.
+
+**Kalau mengedit query SQL apapun di project ini** (terutama yang
+panjang seperti `aggregationQuery`), hitung manual jumlah kolom di
+target `INSERT INTO (...)` vs jumlah ekspresi di `SELECT`/`VALUES`
+sebelum menganggap selesai — atau, kalau memungkinkan, tes langsung ke
+Postgres beneran (`docker compose up`, cek log) sebelum menyimpulkan
+sudah benar.

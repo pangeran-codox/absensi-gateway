@@ -1,0 +1,62 @@
+# docker-compose.swarm.yml — absensi-gateway (Production, Docker Swarm)
+#
+# Dipakai lewat: docker stack deploy -c docker-compose.swarm.yml absensi-gateway
+# BUKAN `docker compose up`.
+#
+# - Tidak ada "build:" — image harus sudah di-push ke registry (Docker Hub/GHCR).
+#   GANTI "<REGISTRY>/absensi-gateway:0.1.0" dengan image asli setelah push.
+#   PAKAI TAG VERSI SPESIFIK, bukan "latest" (audit poin F1) — supaya rollback
+#   ke versi tertentu bisa dilakukan kalau versi baru bermasalah.
+# - Tidak ada "env_file:" — semua variable ${VAR}, disubstitusi dari file
+#   ".env" di folder yang sama saat `docker stack deploy` dijalankan.
+# - Nama service jadi "absensi-gateway_absensi-gateway" (dobel) setelah
+#   dideploy dengan nama stack "absensi-gateway" — MENGIKUTI POLA yang
+#   sudah dipakai stack lain (alumni_alumni_nginx, eduzone_eduzone_nginx).
+#   Kalau dideploy pakai nama stack lain, nama DNS-nya ikut beda —
+#   VERIFIKASI ULANG pakai `docker network inspect shared_network` setelah
+#   deploy pertama, jangan asumsikan dari komentar ini saja.
+# - DATABASE_URL host "infrastructure_postgres" — Postgres YANG SAMA dengan
+#   stack "infrastructure" yang sudah jalan (dikonfirmasi lewat
+#   `docker network inspect shared_network` sebelumnya). Isi
+#   ${POSTGRES_USER}/${POSTGRES_PASSWORD} di .env SAMA dengan kredensial
+#   yang sudah dipakai stack "infrastructure" itu (bukan user baru), dan
+#   pastikan database "eduzone_absensi" sudah ada di instance itu.
+
+services:
+  absensi-gateway:
+    image: ${DOCKER_IMAGE:-<REGISTRY>/absensi-gateway:0.1.0}
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    environment:
+      LISTEN_ADDR: ":8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@infrastructure_postgres:5432/eduzone_absensi?sslmode=disable"
+      JWT_SECRET: "${JWT_SECRET}"
+      TZ: "Asia/Jakarta"
+      SYNC_ENABLED: "${SYNC_ENABLED:-false}"
+      LARAVEL_SYNC_URL: "${LARAVEL_SYNC_URL:-}"
+      LARAVEL_SYNC_TOKEN: "${LARAVEL_SYNC_TOKEN:-}"
+      SYNC_INTERVAL: "${SYNC_INTERVAL:-5m}"
+      AGGREGATION_ENABLED: "${AGGREGATION_ENABLED:-true}"
+      AGGREGATION_INTERVAL: "${AGGREGATION_INTERVAL:-1m}"
+      AGGREGATION_LOOKBACK_DAYS: "${AGGREGATION_LOOKBACK_DAYS:-2}"
+    networks:
+      - shared_network
+
+networks:
+  shared_network:
+    name: shared_network
+    external: true

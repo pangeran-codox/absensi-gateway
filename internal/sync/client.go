@@ -45,7 +45,7 @@ func (c *LaravelClient) FetchSchools(ctx context.Context, since *time.Time) ([]S
 	page := 1
 	for {
 		var batch []SchoolRecord
-		if err := c.fetchPage(ctx, "/schools", since, page, &batch); err != nil {
+		if err := c.fetchPage(ctx, "/api/internal/sync/schools", since, page, &batch); err != nil {
 			return nil, err
 		}
 		all = append(all, batch...)
@@ -63,7 +63,7 @@ func (c *LaravelClient) FetchPeople(ctx context.Context, since *time.Time) ([]Pe
 	page := 1
 	for {
 		var batch []PersonRecord
-		if err := c.fetchPage(ctx, "/people", since, page, &batch); err != nil {
+		if err := c.fetchPage(ctx, "/api/internal/sync/people", since, page, &batch); err != nil {
 			return nil, err
 		}
 		all = append(all, batch...)
@@ -81,7 +81,7 @@ func (c *LaravelClient) FetchSchedules(ctx context.Context, since *time.Time) ([
 	page := 1
 	for {
 		var batch []ScheduleRecord
-		if err := c.fetchPage(ctx, "/schedules", since, page, &batch); err != nil {
+		if err := c.fetchPage(ctx, "/api/internal/sync/schedules", since, page, &batch); err != nil {
 			return nil, err
 		}
 		all = append(all, batch...)
@@ -119,12 +119,12 @@ func (c *LaravelClient) fetchPage(ctx context.Context, path string, since *time.
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("gagal menghubungi Laravel (%s): %w", path, err)
+		return fmt.Errorf("gagal menghubungi Laravel (%s): %w", u.String(), err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Laravel membalas status %d untuk %s", resp.StatusCode, path)
+		return fmt.Errorf("Laravel membalas status %d untuk %s", resp.StatusCode, u.String())
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {

@@ -223,6 +223,40 @@ Dipakai gateway update `devices.last_seen_at`, juga buat device tahu jam server 
 
 ---
 
+## `GET /api/v1/media/photo/{person_id}`
+
+Proxy + cache foto profil dari Laravel — dipanggil langsung dari tag
+`<img src="...">` di browser/kiosk, **bukan** memanggil
+`people_ref.photo_url` secara langsung (URL itu cuma bisa diakses dari
+jaringan Docker internal, tidak untuk browser publik). Lihat
+`docs/spesifikasi-proxy-foto-absensi-gateway.md` untuk spesifikasi
+lengkapnya.
+
+**Auth:** TIDAK ADA (keputusan sadar — `<img src>` tidak bisa kirim
+header custom; keamanannya mengandalkan `person_id` berupa UUID yang
+sulit ditebak + jaringan sudah dibatasi NPM).
+
+**Response:** langsung berupa BYTES gambar (bukan JSON) — `Content-Type`
+sesuai foto asli dari Laravel (mis. `image/jpeg`), atau
+`image/svg+xml` kalau orang tersebut belum punya foto (avatar inisial
+otomatis, sama seperti fallback `photo_url` di response check-in
+device).
+
+**Cache:** disimpan di disk (`internal/media`), divalidasi ulang
+otomatis lewat `people_ref.synced_at` — foto lama otomatis dianggap
+basi begitu data orang itu berubah lagi lewat sinkronisasi berikutnya
+(bukan expired berdasarkan waktu tetap). Response HTTP juga membawa
+`Cache-Control: private, max-age=86400` supaya browser tidak minta
+ulang ke gateway kalau memang belum kedaluwarsa.
+
+**Kalau fetch ke Laravel gagal** (Laravel down, dll): serve cache lama
+kalau ada (foto agak basi masih lebih baik daripada ikon gambar
+rusak), atau fallback ke avatar inisial kalau belum pernah di-cache
+sama sekali. Endpoint ini TIDAK PERNAH membalas error 500 untuk
+kegagalan fetch foto — selalu ada sesuatu yang ditampilkan.
+
+---
+
 ## Urutan Validasi (Check-in Guru)
 
 1. Verifikasi JWT valid & belum expired

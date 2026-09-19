@@ -97,10 +97,6 @@ func lookbackStartDate(now time.Time, lookbackDays int) time.Time {
 //   - primary_method diambil dari check-in valid PALING AWAL hari itu.
 //   - has_anomaly true kalau ADA SAJA event hari itu yang tidak valid
 //     atau punya flagged_reason (mis. duplicate_scan_within_5s).
-//   - updated_at diisi now() secara eksplisit di SELECT (bukan cuma di
-//     klausa ON CONFLICT DO UPDATE) — INSERT butuh nilai untuk SEMUA
-//     kolom di target list, termasuk untuk baris yang benar-benar baru
-//     (belum pernah ada, jadi bukan lewat jalur UPDATE).
 const aggregationQuery = `
 INSERT INTO attendance_daily
 	(school_id, person_id, person_type, date, first_check_in, last_check_out,

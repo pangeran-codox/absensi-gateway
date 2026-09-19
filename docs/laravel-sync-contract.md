@@ -280,8 +280,20 @@ SYNC_INTERVAL=5m
 ```
 `LARAVEL_SYNC_URL` pakai hostname container Laravel (bukan
 `eduzone.local`/NPM) — panggilan ini server-to-server langsung antar
-container Docker, tidak perlu lewat reverse proxy. Restart gateway,
-lalu pantau lognya:
+container Docker, tidak perlu lewat reverse proxy.
+
+**PENTING — jangan tambahkan path di belakangnya.** `LARAVEL_SYNC_URL`
+cuma alamat DASAR (`http://host` atau `http://host:port`), TANPA
+`/api/internal/sync` di belakangnya — gateway yang otomatis
+menambahkan `/api/internal/sync/schools` dkk saat memanggil. Kalau
+`LARAVEL_SYNC_URL` sudah ditambahi `/api/internal/sync` sendiri,
+hasilnya path dobel dan SEMUA panggilan gagal 404:
+```
+SALAH:  LARAVEL_SYNC_URL=http://eduzone_app:80/api/internal/sync
+BENAR:  LARAVEL_SYNC_URL=http://eduzone_app:80
+```
+
+Restart gateway, lalu pantau lognya:
 ```bash
 docker logs -f absensi-gateway-absensi-gateway-1
 ```

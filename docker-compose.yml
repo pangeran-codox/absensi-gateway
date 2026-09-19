@@ -1,6 +1,7 @@
 services:
   absensi-gateway:
     build: .
+    restart: unless-stopped
     environment:
       LISTEN_ADDR: ":8080"
       # host "postgres" adalah hostname container Postgres yang SUDAH
@@ -24,11 +25,21 @@ services:
       AGGREGATION_ENABLED: "${AGGREGATION_ENABLED:-true}"
       AGGREGATION_INTERVAL: "${AGGREGATION_INTERVAL:-1m}"
       AGGREGATION_LOOKBACK_DAYS: "${AGGREGATION_LOOKBACK_DAYS:-2}"
+      PHOTO_CACHE_DIR: "/data/photo-cache"
     ports:
       - "8080:8080"
     networks:
       - network
+    volumes:
+      # Named volume (dikelola Docker, BUKAN bind-mount ke folder host) —
+      # supaya cache foto tidak hilang tiap container di-restart/rebuild.
+      # Kalau volume ini dihapus manual, gateway tetap jalan normal (cuma
+      # cache-nya kosong lagi, langsung fetch ulang dari Laravel).
+      - photo-cache:/data/photo-cache
 
 networks:
   network:
     external: true
+
+volumes:
+  photo-cache:

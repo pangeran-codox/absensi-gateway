@@ -31,6 +31,12 @@ type Config struct {
 	AggregationEnabled      bool
 	AggregationInterval     time.Duration
 	AggregationLookbackDays int
+
+	// Folder cache foto profil (lihat internal/media & GET
+	// /api/v1/media/photo/{person_id}). Selalu ada default, tidak
+	// mensyaratkan volume Docker terpasang -- kalau tidak di-mount,
+	// cache-nya cuma hilang tiap container di-restart (bukan error).
+	PhotoCacheDir string
 }
 
 // Load membaca env var wajib. Kalau ada yang kosong, service langsung
@@ -45,6 +51,8 @@ func Load() (*Config, error) {
 		SyncEnabled:      getEnvOrDefault("SYNC_ENABLED", "false") == "true",
 		LaravelSyncURL:   os.Getenv("LARAVEL_SYNC_URL"),
 		LaravelSyncToken: os.Getenv("LARAVEL_SYNC_TOKEN"),
+
+		PhotoCacheDir: getEnvOrDefault("PHOTO_CACHE_DIR", "/data/photo-cache"),
 	}
 
 	if cfg.DatabaseURL == "" {

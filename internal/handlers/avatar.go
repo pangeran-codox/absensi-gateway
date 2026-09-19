@@ -24,19 +24,26 @@ var avatarColors = []string{
 // untuk ditampilkan, konsisten di semua device, tanpa tiap aplikasi klien
 // harus menulis ulang logic "kalau nggak ada foto, tampilkan apa".
 func initialsAvatarDataURI(fullName string) string {
+	svg := initialsAvatarSVG(fullName)
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(svg)
+}
+
+// initialsAvatarSVG membuat isi SVG mentah (bukan data URI) — dipakai
+// bersama oleh initialsAvatarDataURI (dibungkus base64 buat response
+// JSON check-in) dan MediaHandler (diserve langsung sebagai image/svg+xml
+// buat endpoint foto, lihat internal/handlers/media.go).
+func initialsAvatarSVG(fullName string) []byte {
 	initials := nameInitials(fullName)
 	color := colorForName(fullName)
 
-	svg := fmt.Sprintf(
+	return []byte(fmt.Sprintf(
 		`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">`+
 			`<rect width="200" height="200" fill="%s"/>`+
 			`<text x="100" y="100" font-family="Arial, sans-serif" font-size="80" `+
 			`fill="#ffffff" text-anchor="middle" dominant-baseline="central">%s</text>`+
 			`</svg>`,
 		color, initials,
-	)
-
-	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))
+	))
 }
 
 // nameInitials mengambil huruf pertama dari 2 kata pertama nama (mis.

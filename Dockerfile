@@ -27,7 +27,23 @@ FROM alpine:3.20
 # tambahkan lagi baris `RUN apk add --no-cache ca-certificates` di sini.
 
 WORKDIR /app
-COPY --from=builder /build/absensi-gateway .
+
+# --chown penting: tanpa ini, file yang di-copy tetap dimiliki root,
+# dan user "absensi" di bawah bisa gagal menjalankannya (permission denied).
+RUN addgroup -S absensi && adduser -S -G absensi absensi
+COPY --from=builder --chown=absensi:absensi /build/absensi-gateway .
+
+# Folder cache foto (lihat internal/media) HARUS dibuat & di-chown
+# di sini, SEBELUM `USER absensi` di bawah — kalau tidak, user
+# non-root tidak akan punya izin bikin folder ini sendiri saat
+# runtime (root-level directory defaultnya cuma writable oleh root).
+RUN mkdir -p /data/photo-cache && chown -R absensi:absensi /data
+
+# Jalankan sebagai user biasa, BUKAN root — supaya kalau suatu saat ada
+# celah keamanan yang berhasil dieksploitasi dari dalam container, akses
+# penyerang tetap terbatas (tidak otomatis dapat hak admin penuh di
+# dalam container).
+USER absensi
 
 EXPOSE 8080
 ENTRYPOINT ["./absensi-gateway"]
