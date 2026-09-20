@@ -359,16 +359,26 @@ terkait — intinya: pull lebih tahan banting terhadap jalur input data
 Laravel yang beragam — form admin, import massal, seeder — yang tidak
 semuanya tentu memicu event/observer).
 
-**Status: sisi gateway sudah selesai & teruji (unit test, tanpa
-Postgres). Sisi Laravel BELUM dibuat** — endpoint yang harus
-disediakan Laravel, beserta kontrak lengkap request/response, format
-field, dan contoh kerangka kode, ada di
-**[`docs/laravel-sync-contract.md`](docs/laravel-sync-contract.md)**.
+**Status (per 10 Sept 2026): TERKONFIRMASI JALAN** — endpoint Laravel
+sudah ada & sync berhasil konek. Kontrak lengkap tetap didokumentasikan
+di **[`docs/laravel-sync-contract.md`](docs/laravel-sync-contract.md)**
+untuk referensi format field.
 
-Sampai endpoint Laravel-nya siap dan `SYNC_ENABLED=true` di-set,
-gateway berjalan seperti biasa dengan `SYNC_ENABLED=false` (default) —
-`people_ref`/`schools_ref`/`schedules_ref` tetap harus diisi manual
-untuk testing, seperti sebelumnya.
+**Ketahanan terhadap data bermasalah:** tiap record diproses
+INDEPENDEN (`UpsertSchools`/`UpsertPeople`/`UpsertSchedules` di
+`internal/sync/upsert.go`) — 1 record gagal (mis. foreign key ke
+sekolah yang belum lengkap datanya) TIDAK menggagalkan seluruh batch.
+Yang gagal dicatat di log (`sync <resource>: record <id> DILEWATI ...`)
+dan otomatis dicoba lagi di siklus berikutnya HANYA kalau data
+sumbernya berubah lagi di Laravel — bukan diulang tanpa henti. Ini
+perbaikan dari bug nyata yang pernah kejadian: 1 orang dengan
+`school_id` tidak valid sempat memblokir sinkronisasi SEMUA orang lain
+selamanya, karena watermark tidak maju saat 1 batch gagal total.
+
+Kalau `SYNC_ENABLED=false` (default untuk deployment yang belum siap
+sisi Laravel-nya), gateway tetap berjalan normal —
+`people_ref`/`schools_ref`/`schedules_ref` harus diisi manual untuk
+testing, seperti sebelumnya.
 
 Watermark sinkronisasi (kapan terakhir sukses per resource) dicatat di
 tabel `ref_sync_state` — kalau ingin memaksa full re-sync (tarik ulang

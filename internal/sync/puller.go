@@ -63,13 +63,17 @@ func (p *Puller) pullSchools(ctx context.Context) {
 		return
 	}
 
-	if err := UpsertSchools(ctx, p.db, records); err != nil {
+	failures, err := UpsertSchools(ctx, p.db, records)
+	if err != nil {
+		// Ini error SISTEMIK (mis. gagal siapkan statement) — beda dari
+		// failures per-record di bawah, yang tidak menggagalkan siklus ini.
 		p.recordFailure(ctx, "schools", err)
 		return
 	}
+	logUpsertFailures("schools", failures)
 
 	newWatermark := maxUpdatedAt(since, schoolTimes(records))
-	p.recordSuccess(ctx, "schools", newWatermark, len(records))
+	p.recordSuccess(ctx, "schools", newWatermark, len(records)-len(failures))
 }
 
 func (p *Puller) pullPeople(ctx context.Context) {
@@ -85,13 +89,15 @@ func (p *Puller) pullPeople(ctx context.Context) {
 		return
 	}
 
-	if err := UpsertPeople(ctx, p.db, records); err != nil {
+	failures, err := UpsertPeople(ctx, p.db, records)
+	if err != nil {
 		p.recordFailure(ctx, "people", err)
 		return
 	}
+	logUpsertFailures("people", failures)
 
 	newWatermark := maxUpdatedAt(since, personTimes(records))
-	p.recordSuccess(ctx, "people", newWatermark, len(records))
+	p.recordSuccess(ctx, "people", newWatermark, len(records)-len(failures))
 }
 
 func (p *Puller) pullSchedules(ctx context.Context) {
@@ -107,13 +113,25 @@ func (p *Puller) pullSchedules(ctx context.Context) {
 		return
 	}
 
-	if err := UpsertSchedules(ctx, p.db, records); err != nil {
+	failures, err := UpsertSchedules(ctx, p.db, records)
+	if err != nil {
 		p.recordFailure(ctx, "schedules", err)
 		return
 	}
+	logUpsertFailures("schedules", failures)
 
 	newWatermark := maxUpdatedAt(since, scheduleTimes(records))
-	p.recordSuccess(ctx, "schedules", newWatermark, len(records))
+	p.recordSuccess(ctx, "schedules", newWatermark, len(records)-len(failures))
+}
+
+// logUpsertFailures mencetak tiap record yang gagal secara eksplisit —
+// supaya kalau ada data bermasalah di Laravel (mis. foreign key ke
+// sekolah yang belum lengkap datanya), itu KETAHUAN dari log, bukan diam-
+// diam ke-skip tanpa jejak.
+func logUpsertFailures(resource string, failures []UpsertFailure) {
+	for _, f := range failures {
+		log.Printf("sync %s: record %s DILEWATI (gagal disimpan): %v", resource, f.ID, f.Cause)
+	}
 }
 
 // getWatermark membaca last_synced_at dari ref_sync_state untuk resource

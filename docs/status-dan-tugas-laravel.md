@@ -23,7 +23,7 @@ data dummy.
 | Proses | Fungsi | Status |
 |---|---|---|
 | Agregasi harian | `attendance_events` (log mentah) → `attendance_daily` (rekap per orang per hari), termasuk deteksi status Terlambat | ✅ Aktif otomatis, sempat ada bug SQL yang baru diperbaiki — perlu 1 kali lagi tes konfirmasi |
-| Sync dari Laravel | Isi otomatis `schools_ref`/`people_ref`/`schedules_ref` | ⚠️ **STATUS BELUM JELAS (perlu verifikasi)** — tim Laravel mengirim dokumen (9 Sept 2026) yang menyatakan endpoint `/api/internal/sync/people` "sudah aktif, sudah dites", TAPI log gateway per 2 Sept masih 404 terus-menerus. Kemungkinan: (a) baru dibangun setelah 2 Sept, (b) `LARAVEL_SYNC_URL` di `.env` gateway salah format (path dobel — pernah kejadian sebelumnya, lihat `docs/laravel-sync-contract.md`), atau (c) ada sesi kerja lain yang progress-nya belum sampai ke kode yang dipegang sesi ini. **Jangan asumsikan ini sudah beres tanpa coba restart sync & cek log lagi.**
+| Sync dari Laravel | Isi otomatis `schools_ref`/`people_ref`/`schedules_ref` | ✅ **TERKONFIRMASI JALAN** (10 Sept 2026) — dugaan (b) di riwayat sebelumnya benar: `LARAVEL_SYNC_URL` salah format (path dobel). Setelah dibenerin, `sync schools` & `sync schedules` sukses konek ke Laravel beneran. `sync people` sukses SEBAGIAN — lihat bug ditemukan+diperbaiki di bawah. |
 
 **Kesimpulan Bagian 1:** RFID/QR check-in itu **satu-satunya jalur yang
 udah beneran teruji end-to-end**. Semua yang butuh token JWT dari
@@ -122,6 +122,35 @@ proteksi lebih (mis. token sementara di URL), perlu didiskusikan lagi
 sebelum production beneran — bukan sesuatu yang gateway putuskan
 sepihak permanen.
 
+### 2.2c Bug Ditemukan & Diperbaiki: Sync `people` Rentan Macet Total (10 Sept 2026)
+
+Begitu `LARAVEL_SYNC_URL` dibenerin dan sync beneran konek ke Laravel,
+ketahuan bug baru: **1 orang dengan `school_id` yang belum ada di
+`schools_ref` gateway bikin SELURUH batch sync `people` gagal**, dan
+karena watermark tidak maju, siklus berikutnya mengulang batch yang
+SAMA, gagal lagi di orang yang SAMA, **tanpa henti** — 1 data
+bermasalah bisa memblokir sinkronisasi semua orang lain selamanya.
+
+**Sudah diperbaiki di sisi gateway** — sekarang tiap orang diproses
+independen; yang gagal dicatat & dilewati di log (`sync people: record
+<id> DILEWATI (gagal disimpan): ...`), yang lain tetap tersimpan.
+Watermark tetap maju, jadi begitu data sumbernya diperbaiki di
+Laravel, record itu otomatis ke-sync lagi di siklus berikutnya —
+tanpa perlu campur tangan manual di gateway.
+
+**Perlu diteruskan ke tim Laravel:** akar masalahnya ada 1 sekolah
+("sekolah kedua" di data testing) yang datanya belum lengkap — tidak
+punya `latitude`/`longitude`, jadi kemungkinan sengaja tidak dikirim
+di endpoint `/api/internal/sync/schools` (schools sync melapor
+"sukses, 0 record" untuk sekolah ini), TAPI orang-orang yang terdaftar
+di sekolah itu tetap dikirim lewat `/api/internal/sync/people`. Ini
+menciptakan data yang "yatim" (orang ada, sekolahnya tidak) dari sudut
+pandang gateway. Idealnya salah satu dari ini dilakukan di sisi
+Laravel: (a) lengkapi data sekolah itu (isi koordinat GPS-nya), atau
+(b) jangan sertakan orang-orang dari sekolah yang datanya belum
+lengkap di endpoint sync `people`, sampai sekolahnya sendiri lengkap
+dan berhasil disinkronkan.
+
 ### 2.3 Belum mendesak, tapi diperlukan untuk fitur lengkap nanti
 
 - **Sync balik** — hasil absen (`attendance_daily`) belum pernah
@@ -141,7 +170,13 @@ sepihak permanen.
 ## Ringkasan Prioritas
 
 1. **JWT issuance** (Bagian 2.1) — tanpa ini, 3 dari 6 endpoint gateway
-   tidak bisa dipakai/dites sama sekali. Paling menghambat.
-2. **3 endpoint sync** (Bagian 2.2) — kontrak sudah siap, tinggal
-   diimplementasi, langsung menggantikan input data manual.
-3. Sisanya (2.3) bisa menyusul setelah 2 di atas jalan.
+   tidak bisa dipakai/dites sama sekali. Paling menghambat, MASIH
+   BELUM SELESAI.
+2. ~~**3 endpoint sync** (Bagian 2.2)~~ — ✅ **SUDAH JALAN** (10 Sept
+   2026), termasuk bug ketahanan sync yang ditemukan & diperbaiki
+   (2.2c). Tersisa 1 data quality issue di sisi Laravel yang perlu
+   diteruskan (lihat 2.2c).
+3. **Proxy foto** (2.2b) — kode gateway selesai, tunggu data
+   `photo_url` beneran mengalir lewat sync `people` yang sekarang
+   sudah jalan, lalu tes end-to-end.
+4. Sisanya (2.3) bisa menyusul setelah di atas selesai.
